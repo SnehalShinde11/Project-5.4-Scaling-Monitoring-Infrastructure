@@ -349,6 +349,107 @@ An empty listing with no error is expected for a newly created bucket because no
 - **Missing credentials:** check that both required variables exist without displaying their values: `sed -E 's/=.*/=<hidden>/' .env`.
 - **Bucket already exists:** run the bucket listing command to verify access instead of trying to recreate it.
 
+## Task 4 — Deploy Thanos Sidecars, Store Gateway, and Query
+
+### Objective
+
+Connect the three regional Prometheus TSDBs to Thanos, use MinIO as the S3-compatible object store, and expose a unified Thanos Query endpoint. This task uses the existing regional Prometheus configurations and persistent volumes; do not recreate those files or delete the volumes.
+
+### Files used
+
+- `compose-task-4.yaml` — full Task 4 stack, including the regional Prometheus services, federation master, MinIO, three Thanos Sidecars, Store Gateway, and Query.
+- `thanos/objstore.yml` — generated locally from `.env`; it contains credentials and is ignored by Git.
+- `scripts/generate-thanos-objstore.py` — generates the local object-store config without printing secrets.
+- `prometheus/{us-east,eu-west,ap-south}/prometheus.yml` — existing regional configurations with external labels.
+
+The Compose file uses the `project-54` project name in the commands below to keep the existing named volumes consistent. It also binds web interfaces to localhost rather than exposing them publicly.
+
+### Step 1: Prepare local credentials and generate the object-store config
+
+Run these commands from the repository root on the VM. If the existing `.env` is already configured, do not replace it.
+
+```bash
+cd ~/Project-5.4
+test -f .env || cp .env.example .env
+nano .env
+python3 scripts/generate-thanos-objstore.py
+```
+
+Set `MINIO_ROOT_USER` and `MINIO_ROOT_PASSWORD` in `.env` to the same credentials MinIO uses. The script writes `thanos/objstore.yml` with file permissions `600`. Do not display, paste, or commit either file.
+
+### Step 2: Validate the Compose configuration
+
+```bash
+docker compose -p project-54 -f compose-task-4.yaml config --quiet
+docker compose -p project-54 -f compose-task-4.yaml config --services
+```
+
+The service list should include the three regional Prometheus services, `prometheus-federation`, `minio`, all three `thanos-sidecar-*` services, `thanos-store`, and `thanos-query`.
+
+### Step 3: Start or reconcile the stack
+
+```bash
+docker compose -p project-54 -f compose-task-4.yaml up -d
+docker compose -p project-54 -f compose-task-4.yaml ps
+```
+
+Use the same project name and Compose file for subsequent commands. Do not start this file under a different Compose project name, because that can create a second set of containers and volumes. Never run `docker compose down -v`; that would remove persistent volumes.
+
+### Step 4: Verify readiness
+
+```bash
+for port in 9091 9092 9093 9094 9095; do
+  printf 'Port %s: ' "$port"
+  curl -s -o /dev/null -w '%{http_code}\n' "http://127.0.0.1:${port}/-/ready"
+done
+```
+
+Expected: HTTP `200` from the three regional Prometheus endpoints, the federation master, and Thanos Query. Check MinIO separately:
+
+```bash
+curl -s -o /dev/null -w 'MinIO readiness: %{http_code}\n' \
+  http://127.0.0.1:9000/minio/health/ready
+```
+
+Expected: HTTP `200`.
+
+### Step 5: Verify that Thanos Query sees all three regional Prometheus instances
+
+```bash
+curl -fsSG 'http://127.0.0.1:9095/api/v1/query' \
+  --data-urlencode 'query=up' | python3 -m json.tool
+```
+
+Confirm that the response is successful and contains series for `us-east`, `eu-west`, and `ap-south`. For current regional scrape health, each region's `up` series should have value `1`.
+
+### Step 6: Verify object-store access and block shipping
+
+First verify that the bucket can be listed with the configured credentials. An empty bucket is valid before the first completed TSDB block is uploaded. Do not treat an empty listing alone as a credentials failure.
+
+The regional Prometheus services in this task use a two-hour minimum and maximum TSDB block duration. With a fresh or recently restarted TSDB, allow sufficient time for Prometheus to create its first completed block. Check for block metadata:
+
+```bash
+for c in project-54-prometheus-us-east-1 project-54-prometheus-eu-west-1 project-54-prometheus-ap-south-1; do
+  echo "===== $c ====="
+  sudo docker exec "$c" sh -c \
+    'find /prometheus -mindepth 2 -maxdepth 2 -type f -name meta.json'
+done
+```
+
+Once a `meta.json` appears, inspect the matching Sidecar logs and confirm the block is uploaded to the `thanos` bucket. Do not claim upload success until the object is visible in MinIO and the Sidecar logs confirm shipping.
+
+### Troubleshooting
+
+- **Object-store access denied:** verify that the credentials in the ignored `.env` and generated `thanos/objstore.yml` match MinIO. Regenerate the file after changing credentials; do not print the secret.
+- **Sidecar cannot read Prometheus data:** keep the `group_add: ["65534"]` setting and check logs for the exact permission error before changing volume ownership.
+- **No completed blocks yet:** check the running Prometheus block-duration flags, head timestamps, uptime, and logs. With a two-hour block duration, no block during the first part of a fresh run can be normal.
+- **Query is ready but historical data is missing:** Query readiness only proves the HTTP service is responding. Check Sidecar endpoints first, then verify a completed block exists in MinIO and that Store Gateway has synchronized it.
+- **Persistent data:** never remove the named volumes or run `docker compose down -v` as a troubleshooting shortcut.
+
+### Expected outcome
+
+The three Sidecars connect to their regional Prometheus instances, Thanos Query can query the live regional endpoints, and Store Gateway is configured to read historical TSDB blocks from MinIO. The final object-upload and historical-query checks are only complete after a block has been created, verified in the bucket, and returned by a historical query.
+
 ## Documentation status
 
-Tasks 1–3 currently have end-user execution and verification instructions. Tasks 4–6 will be documented with tested commands and expected results as the Thanos, Grafana, and durability-test implementations are completed. Use the configuration files already included in the repository rather than recreating them manually.
+Tasks 1–4 have end-user setup and verification instructions. Task 4 documents live-query checks separately from completed-block shipping and historical-query verification. Tasks 5–6 still require their Grafana provisioning and durability-test procedures. Use the existing configuration files; do not recreate files that are already present.
