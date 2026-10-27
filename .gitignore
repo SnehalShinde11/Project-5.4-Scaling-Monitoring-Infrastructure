@@ -10,6 +10,7 @@ storage/
 *.log
 
 # Prometheus TSDB and local generated data
+thanos/objstore.yml
 prometheus-data/
 thanos-data/
 minio-data/
