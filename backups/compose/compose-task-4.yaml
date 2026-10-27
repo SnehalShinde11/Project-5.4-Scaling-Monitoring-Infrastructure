@@ -1,0 +1,182 @@
+services:
+  minio:
+    image: cgr.dev/chainguard/minio:latest
+    command: server /data --console-address ":9001"
+    env_file:
+      - .env
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    volumes:
+      - minio_data:/data
+    restart: unless-stopped
+
+  prometheus-us-east:
+    image: prom/prometheus:latest
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=24h
+      - --storage.tsdb.min-block-duration=2h
+      - --storage.tsdb.max-block-duration=2h
+      - --web.enable-lifecycle
+      - --web.enable-admin-api
+    ports:
+      - "127.0.0.1:9091:9090"
+    volumes:
+      - ./prometheus/us-east/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_us_east_data:/prometheus
+    restart: unless-stopped
+
+  prometheus-eu-west:
+    image: prom/prometheus:latest
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=24h
+      - --storage.tsdb.min-block-duration=2h
+      - --storage.tsdb.max-block-duration=2h
+      - --web.enable-lifecycle
+      - --web.enable-admin-api
+    ports:
+      - "127.0.0.1:9092:9090"
+    volumes:
+      - ./prometheus/eu-west/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_eu_west_data:/prometheus
+    restart: unless-stopped
+
+  prometheus-ap-south:
+    image: prom/prometheus:latest
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=24h
+      - --storage.tsdb.min-block-duration=2h
+      - --storage.tsdb.max-block-duration=2h
+      - --web.enable-lifecycle
+      - --web.enable-admin-api
+    ports:
+      - "127.0.0.1:9093:9090"
+    volumes:
+      - ./prometheus/ap-south/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_ap_south_data:/prometheus
+    restart: unless-stopped
+
+  prometheus-federation:
+    image: prom/prometheus:latest
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=24h
+      - --web.enable-lifecycle
+      - --web.enable-admin-api
+    ports:
+      - "127.0.0.1:9094:9090"
+    volumes:
+      - ./prometheus/federation/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_federation_data:/prometheus
+    depends_on:
+      - prometheus-us-east
+      - prometheus-eu-west
+      - prometheus-ap-south
+    restart: unless-stopped
+
+  thanos-sidecar-us-east:
+    image: quay.io/thanos/thanos:v0.39.2
+    command:
+      - sidecar
+      - --tsdb.path=/prometheus
+      - --prometheus.url=http://prometheus-us-east:9090
+      - --objstore.config-file=/etc/thanos/objstore.yml
+      - --grpc-address=0.0.0.0:10901
+      - --http-address=0.0.0.0:10902
+    volumes:
+      - prometheus_us_east_data:/prometheus
+      - ./thanos/objstore.yml:/etc/thanos/objstore.yml:ro
+    group_add:
+      - "65534"
+    depends_on:
+      - prometheus-us-east
+      - minio
+    restart: unless-stopped
+
+  thanos-sidecar-eu-west:
+    image: quay.io/thanos/thanos:v0.39.2
+    command:
+      - sidecar
+      - --tsdb.path=/prometheus
+      - --prometheus.url=http://prometheus-eu-west:9090
+      - --objstore.config-file=/etc/thanos/objstore.yml
+      - --grpc-address=0.0.0.0:10901
+      - --http-address=0.0.0.0:10902
+    volumes:
+      - prometheus_eu_west_data:/prometheus
+      - ./thanos/objstore.yml:/etc/thanos/objstore.yml:ro
+    group_add:
+      - "65534"
+    depends_on:
+      - prometheus-eu-west
+      - minio
+    restart: unless-stopped
+
+  thanos-sidecar-ap-south:
+    image: quay.io/thanos/thanos:v0.39.2
+    command:
+      - sidecar
+      - --tsdb.path=/prometheus
+      - --prometheus.url=http://prometheus-ap-south:9090
+      - --objstore.config-file=/etc/thanos/objstore.yml
+      - --grpc-address=0.0.0.0:10901
+      - --http-address=0.0.0.0:10902
+    volumes:
+      - prometheus_ap_south_data:/prometheus
+      - ./thanos/objstore.yml:/etc/thanos/objstore.yml:ro
+    group_add:
+      - "65534"
+    depends_on:
+      - prometheus-ap-south
+      - minio
+    restart: unless-stopped
+
+  thanos-store:
+    image: quay.io/thanos/thanos:v0.39.2
+    command:
+      - store
+      - --data-dir=/var/thanos/store
+      - --objstore.config-file=/etc/thanos/objstore.yml
+      - --grpc-address=0.0.0.0:10901
+      - --http-address=0.0.0.0:10902
+    volumes:
+      - thanos_store_data:/var/thanos/store
+      - ./thanos/objstore.yml:/etc/thanos/objstore.yml:ro
+    depends_on:
+      - minio
+    restart: unless-stopped
+
+  thanos-query:
+    image: quay.io/thanos/thanos:v0.39.2
+    command:
+      - query
+      - --http-address=0.0.0.0:10902
+      - --grpc-address=0.0.0.0:10901
+      - --query.replica-label=replica
+      - --store=thanos-sidecar-us-east:10901
+      - --store=thanos-sidecar-eu-west:10901
+      - --store=thanos-sidecar-ap-south:10901
+      - --store=thanos-store:10901
+    ports:
+      - "127.0.0.1:9095:10902"
+    depends_on:
+      - thanos-sidecar-us-east
+      - thanos-sidecar-eu-west
+      - thanos-sidecar-ap-south
+      - thanos-store
+    restart: unless-stopped
+
+volumes:
+  minio_data:
+  prometheus_us_east_data:
+  prometheus_eu_west_data:
+  prometheus_ap_south_data:
+  prometheus_federation_data:
+  thanos_store_data:
