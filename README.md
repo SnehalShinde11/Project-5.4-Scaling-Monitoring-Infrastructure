@@ -38,6 +38,8 @@ Each Prometheus instance has its own configuration, regional external labels, an
 
 **Compose backup:** The repository includes the [Task 1 Compose snapshot](backups/compose/compose-task-1.yaml), which captures the configuration before the federation master was added. Use it as a reference or rollback copy only; the current [`compose.yaml`](compose.yaml) is the main configuration for the completed Task 2 setup. The snapshot still expects the repository's `.env` file for MinIO and should be run from the repository root.
 
+For Task 4 work, keep the active Thanos configuration in the root-level `compose-task-4.yaml` and, if you want a versioned backup snapshot, save a reviewed copy as `backups/compose/compose-task-4.yaml`. The named Task 4 backup is allowlisted in `.gitignore`; timestamped recovery copies remain ignored. The root-level Task 4 file is a copy of the current configuration, not an isolated Compose project. Do not run it alongside `compose.yaml` as a separate stack with the default project name; Compose may manage the same containers and volumes. Keep `.env` and generated `thanos/objstore.yml` private and out of Git.
+
 ### Step 1: Clone the repository
 
 Clone the repository and enter the project directory:
