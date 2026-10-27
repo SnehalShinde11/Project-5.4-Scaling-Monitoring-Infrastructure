@@ -36,6 +36,8 @@ Deploy three independent Prometheus instances representing the US East, EU West,
 
 Each Prometheus instance has its own configuration, regional external labels, and persistent storage volume. In the initial lab configuration, each instance scrapes its own Prometheus metrics endpoint. Add region-specific application or exporter targets when distinct target sets are required.
 
+**Compose backup:** The repository includes the [Task 1 Compose snapshot](backups/compose/compose-task-1.yaml), which captures the configuration before the federation master was added. Use it as a reference or rollback copy only; the current [`compose.yaml`](compose.yaml) is the main configuration for the completed Task 2 setup. The snapshot still expects the repository's `.env` file for MinIO and should be run from the repository root.
+
 ### Step 1: Clone the repository
 
 Clone the repository and enter the project directory:
@@ -186,7 +188,7 @@ docker compose ps
 ### Step 4: Check readiness
 
 ```bash
-curl -s -o /dev/null -w 'Master HTTP status: %{http_code}\\n' \
+curl -s -o /dev/null -w 'Master HTTP status: %{http_code}\n' \
   http://127.0.0.1:9094/-/ready
 ```
 
@@ -254,3 +256,6 @@ A fourth Prometheus instance acts as the federation master and successfully coll
 
 **Scope note:** Federation only transfers time series matched by the configured `match[]` selector; it does not automatically copy every metric from each regional Prometheus. The initial regional configurations scrape their own Prometheus metrics endpoints. Add application or exporter scrape targets to the regional configurations when the lab requires distinct regional workloads.
 
+## Documentation status
+
+Tasks 1 and 2 currently have end-user execution and verification instructions. Tasks 3–6 will be documented with tested commands and expected results as the MinIO, Thanos, Grafana, and durability-test implementations are completed. Use the configuration files already included in the repository rather than recreating them manually.
