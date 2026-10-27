@@ -24,3 +24,7 @@ minio-data/
 
 # Local tool environments
 .venv-tools/
+
+# Ignore timestamped local recovery copies, but publish the named Task 1 snapshot
+backups/compose/compose-*.yaml
+!backups/compose/compose-task-1.yaml

@@ -53,8 +53,27 @@ services:
       - prometheus_ap_south_data:/prometheus
     restart: unless-stopped
 
+  prometheus-federation:
+    image: prom/prometheus:latest
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=24h
+      - --web.enable-lifecycle
+    ports:
+      - "127.0.0.1:9094:9090"
+    volumes:
+      - ./prometheus/federation/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_federation_data:/prometheus
+    depends_on:
+      - prometheus-us-east
+      - prometheus-eu-west
+      - prometheus-ap-south
+    restart: unless-stopped
+
 volumes:
   minio_data:
   prometheus_us_east_data:
   prometheus_eu_west_data:
   prometheus_ap_south_data:
+  prometheus_federation_data:
