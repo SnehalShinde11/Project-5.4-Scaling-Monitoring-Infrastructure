@@ -256,6 +256,97 @@ A fourth Prometheus instance acts as the federation master and successfully coll
 
 **Scope note:** Federation only transfers time series matched by the configured `match[]` selector; it does not automatically copy every metric from each regional Prometheus. The initial regional configurations scrape their own Prometheus metrics endpoints. Add application or exporter scrape targets to the regional configurations when the lab requires distinct regional workloads.
 
+## Task 3 — Configure MinIO object storage
+
+### Objective
+
+Create the S3-compatible bucket that Thanos will use for Prometheus TSDB blocks in Task 4. This task verifies bucket access only; Thanos uploads and historical-query validation are covered later.
+
+### Prerequisites
+
+- Task 1 services are running and MinIO readiness returns HTTP `200`.
+- The repository's `.env` file exists locally and contains `MINIO_ROOT_USER` and `MINIO_ROOT_PASSWORD`. Create it from `.env.example` if needed, and set a strong lab password.
+- Run the commands below on the VM from the repository root. MinIO is intentionally bound to `127.0.0.1:9000`; do not expose this endpoint publicly.
+
+### Step 1: Check MinIO readiness
+
+```bash
+cd ~/Project-5.4
+
+sudo docker compose ps minio
+
+curl -s -o /dev/null \
+  -w 'MinIO readiness HTTP status: %{http_code}\n' \
+  http://127.0.0.1:9000/minio/health/ready
+
+# Confirm required variable names without printing secret values
+sed -E 's/=.*/=<hidden>/' .env
+```
+
+Expected: MinIO is running, readiness returns `200`, and the two variable names are present.
+
+### Step 2: Install AWS CLI in a local Python virtual environment
+
+The AWS CLI can use MinIO's S3-compatible API. The virtual environment keeps the Python package installation isolated from system Python.
+
+```bash
+sudo apt-get update
+sudo apt-get install -y python3-venv
+
+python3 -m venv .venv-task3
+. .venv-task3/bin/activate
+python -m pip install --upgrade pip
+python -m pip install awscli
+```
+
+### Step 3: Authenticate and create the bucket
+
+The following commands read credentials from the local `.env` file; they do not print the values. Do not commit `.env` or paste its contents into chat.
+
+```bash
+cd ~/Project-5.4
+
+export AWS_ACCESS_KEY_ID="$(sed -n 's/^MINIO_ROOT_USER=//p' .env)"
+export AWS_SECRET_ACCESS_KEY="$(sed -n 's/^MINIO_ROOT_PASSWORD=//p' .env)"
+export AWS_DEFAULT_REGION=us-east-1
+export AWS_EC2_METADATA_DISABLED=true
+
+aws configure set default.s3.signature_version s3v4
+
+# List buckets before creating the target bucket
+aws --endpoint-url http://127.0.0.1:9000 s3 ls
+
+# Create the bucket; if it already exists, continue to verification
+aws --endpoint-url http://127.0.0.1:9000 s3 mb s3://thanos
+```
+
+If the bucket already exists, AWS CLI may report that it cannot be created because it already exists. This is not a problem; proceed to the verification command.
+
+### Step 4: Verify the bucket
+
+```bash
+aws --endpoint-url http://127.0.0.1:9000 s3 ls s3://thanos
+
+# Remove credentials from this shell when finished
+unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
+```
+
+An empty listing with no error is expected for a newly created bucket because no Thanos blocks have been uploaded yet.
+
+### Expected outcome
+
+- MinIO readiness is HTTP `200`.
+- The `thanos` bucket is created and can be listed using the AWS CLI.
+- Credentials remain in the ignored local `.env` file and are not committed.
+- No claim is made yet about Thanos uploads or historical queries; those are verified in Tasks 4 and 6.
+
+### Troubleshooting
+
+- **Connection refused:** check `sudo docker compose ps minio` and `sudo docker compose logs --tail=100 minio`.
+- **Access denied / signature error:** verify the local `.env` variable names and values; ensure the AWS CLI signature version is set to `s3v4`.
+- **Missing credentials:** check that both required variables exist without displaying their values: `sed -E 's/=.*/=<hidden>/' .env`.
+- **Bucket already exists:** run the bucket listing command to verify access instead of trying to recreate it.
+
 ## Documentation status
 
-Tasks 1 and 2 currently have end-user execution and verification instructions. Tasks 3–6 will be documented with tested commands and expected results as the MinIO, Thanos, Grafana, and durability-test implementations are completed. Use the configuration files already included in the repository rather than recreating them manually.
+Tasks 1–3 currently have end-user execution and verification instructions. Tasks 4–6 will be documented with tested commands and expected results as the Thanos, Grafana, and durability-test implementations are completed. Use the configuration files already included in the repository rather than recreating them manually.
