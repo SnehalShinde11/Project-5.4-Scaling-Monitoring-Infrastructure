@@ -136,3 +136,121 @@ Three independent regional Prometheus instances are running with separate config
 - If Compose reports that `.env` is missing, repeat Step 2.
 - If a readiness check fails, run `docker compose ps` and inspect the corresponding service logs before continuing.
 
+## Task 2 — Configure Prometheus Federation
+
+### Objective
+
+Run a federation master that collects selected metrics from the three regional Prometheus instances. The master uses the regional services' internal Docker network addresses, so it does not depend on their host-mapped ports.
+
+### Federation configuration
+
+The existing configuration is:
+
+`prometheus/federation/prometheus.yml`
+
+It defines three federation scrape jobs, each querying the regional Prometheus `/federate` endpoint with the selector `{job="prometheus"}`. The `honor_labels: true` setting preserves labels on federated time series, including each source's `region` label. Each federation job also adds a `source_region` target label for identifying the source in federation scrape-health metrics.
+
+The Compose service is named `prometheus-federation`, maps host port `127.0.0.1:9094` to container port `9090`, and stores its TSDB in the separate `prometheus_federation_data` volume.
+
+### Step 1: Create a backup before changing Compose
+
+If you are adding the master service to an existing lab, save a copy of the current Compose file first:
+
+```bash
+mkdir -p backups/compose
+cp compose.yaml "backups/compose/compose-before-federation-$(date +%Y%m%d-%H%M%S).yaml"
+```
+
+These are local recovery copies. Keep secrets out of backups and do not commit local backups unless they have been reviewed and sanitized.
+
+### Step 2: Validate the configuration
+
+From the repository directory, validate the Compose file and confirm the federation service is listed:
+
+```bash
+docker compose config --quiet
+docker compose config --services
+```
+
+The service list should include `prometheus-federation` as well as the three regional Prometheus services and MinIO.
+
+### Step 3: Start the federation master
+
+Ensure the three regional Prometheus services are running, then start the master:
+
+```bash
+docker compose up -d prometheus-federation
+docker compose ps
+```
+
+### Step 4: Check readiness
+
+```bash
+curl -s -o /dev/null -w 'Master HTTP status: %{http_code}\\n' \
+  http://127.0.0.1:9094/-/ready
+```
+
+Expected result: HTTP status `200`.
+
+### Step 5: Verify federation scrape targets
+
+Allow at least 15–30 seconds for the first scrape, then run:
+
+```bash
+curl -s http://127.0.0.1:9094/api/v1/targets | python3 -c '
+import json, sys
+data = json.load(sys.stdin)
+for target in data["data"]["activeTargets"]:
+    print(
+        "job:", target["labels"].get("job"),
+        "| health:", target["health"],
+        "| scrape URL:", target["scrapeUrl"],
+        "| error:", target.get("lastError", "")
+    )
+'
+```
+
+Expected result: `federation-us-east`, `federation-eu-west`, and `federation-ap-south` each report health `up`, with no scrape error.
+
+### Step 6: Query federated regional metrics
+
+Check that the master has received the regional `up` time series:
+
+```bash
+curl -sG 'http://127.0.0.1:9094/api/v1/query' \
+  --data-urlencode 'query=count by (region) (up{job="prometheus"})' \
+  | python3 -m json.tool
+```
+
+Expected result: successful query results for the `us-east`, `eu-west`, and `ap-south` region labels, each with value `1`.
+
+Verify the federation scrape-health metrics separately:
+
+```bash
+curl -sG 'http://127.0.0.1:9094/api/v1/query' \
+  --data-urlencode 'query=up{job=~"federation-.*"}' \
+  | python3 -m json.tool
+```
+
+Expected result: three series, one per federation job, each with value `1`. If a target is down, inspect `docker compose logs prometheus-federation` and check that all regional services are running.
+
+### Step 7: Access the master safely
+
+The master is bound to localhost rather than exposed directly to the public network. For a remote VM, add a tunnel for port `9094` to the SSH command used in Task 1:
+
+```bash
+ssh -L 9091:127.0.0.1:9091 \
+    -L 9092:127.0.0.1:9092 \
+    -L 9093:127.0.0.1:9093 \
+    -L 9094:127.0.0.1:9094 \
+    <SSH_USER>@<VM_PUBLIC_IP>
+```
+
+With the tunnel active, open http://localhost:9094.
+
+### Expected outcome
+
+A fourth Prometheus instance acts as the federation master and successfully collects the selected `job="prometheus"` series from all three regional instances. Regional labels remain queryable, and federation target health can be monitored independently.
+
+**Scope note:** Federation only transfers time series matched by the configured `match[]` selector; it does not automatically copy every metric from each regional Prometheus. The initial regional configurations scrape their own Prometheus metrics endpoints. Add application or exporter scrape targets to the regional configurations when the lab requires distinct regional workloads.
+
