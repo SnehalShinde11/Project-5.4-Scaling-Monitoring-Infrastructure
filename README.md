@@ -4,6 +4,80 @@
 
 Build a scalable monitoring environment using multiple Prometheus instances, Prometheus federation, MinIO object storage, Thanos components, and Grafana unified visualization.
 
+## Problem Statement Overview
+
+As a monitoring environment grows, relying on a single Prometheus instance can make it difficult to scale metric collection across multiple regions and services. Monitoring data should also remain available for historical analysis when a regional Prometheus instance becomes unavailable.
+
+This project demonstrates a scalable monitoring architecture using multiple regional Prometheus instances, Prometheus federation, MinIO object storage, Thanos, and Grafana.
+
+The lab represents three regions:
+
+- US East
+- EU West
+- AP South
+
+The architecture collects metrics independently in each region, federates selected metrics into a central Prometheus instance, and uses Thanos with S3-compatible object storage to support unified queries and historical metric access.
+
+The durability objective is to verify that previously stored metrics remain queryable after a regional Prometheus instance is stopped. This objective is considered verified only after a completed TSDB block has been uploaded to object storage and a historical query successfully returns the stored data.
+
+## Solution Approach
+
+1. **Regional monitoring:** Run three independent Prometheus instances, each with its own configuration, regional external labels, and persistent TSDB storage.
+2. **Prometheus federation:** Configure a federation master to collect selected time series from the regional Prometheus instances while preserving their regional labels.
+3. **Object storage:** Use MinIO as an S3-compatible object store and create the `thanos` bucket for storing completed Prometheus TSDB blocks.
+4. **Thanos integration:** Deploy Thanos Sidecars alongside the regional Prometheus instances, configure Store Gateway to access historical blocks, and use Thanos Query as the unified query endpoint.
+5. **Grafana visualization:** Configure Grafana to query Thanos Query so regional metrics can be visualized through a unified interface.
+6. **Durability validation:** Stop a regional Prometheus instance and verify whether previously uploaded historical metrics remain queryable through Thanos.
+7. **Layer-by-layer verification:** Check service readiness, live metric queries, completed-block creation, object-store uploads, and historical queries separately. A ready service alone does not confirm successful block shipping or historical-data durability.
+
+## Dependencies and Setup Overview
+
+### Dependencies
+
+- Linux host or virtual machine with sufficient resources to run the monitoring containers.
+- Git.
+- Docker Engine and Docker Compose plugin.
+- `curl` for HTTP readiness and API checks.
+- Python 3 for helper scripts and API-response inspection.
+- Network access to download Prometheus, MinIO, Thanos, and Grafana container images.
+- AWS CLI for the MinIO S3-compatible bucket operations described in Task 3.
+- A local `.env` file containing the required MinIO credentials.
+
+### Initial Setup
+
+Clone the repository if it is not already present on the host:
+
+```bash
+git clone https://github.com/SnehalShinde11/Project-5.4-Scaling-Monitoring-Infrastructure.git
+cd Project-5.4-Scaling-Monitoring-Infrastructure
+```
+
+If you have already cloned the repository, navigate to the existing project directory instead.
+
+Create `.env` from `.env.example` only if the file does not already exist, then configure the local credentials:
+
+```bash
+test -f .env || cp .env.example .env
+nano .env
+```
+
+Validate the existing main Compose configuration:
+
+```bash
+docker compose config --quiet
+```
+
+For the Task 4 configuration, generate the local Thanos object-store configuration and validate the Compose file:
+
+```bash
+python3 scripts/generate-thanos-objstore.py
+docker compose -p project-54 -f compose-task-4.yaml config --quiet
+```
+
+Continue using the task-specific execution instructions already documented in this README. This overview does not replace or modify the existing Task 1–4 procedures.
+
+**Security note:** Keep `.env` and the generated `thanos/objstore.yml` private and untracked. Never commit credentials or expose their values in logs or documentation.
+
 ## Assignment Tasks
 
 1. Simulate a scaled environment using 2–3 regional Prometheus instances.
@@ -450,6 +524,9 @@ Once a `meta.json` appears, inspect the matching Sidecar logs and confirm the bl
 
 The three Sidecars connect to their regional Prometheus instances, Thanos Query can query the live regional endpoints, and Store Gateway is configured to read historical TSDB blocks from MinIO. The final object-upload and historical-query checks are only complete after a block has been created, verified in the bucket, and returned by a historical query.
 
-## Documentation status
+## Assignment Details
 
-Tasks 1–4 have end-user setup and verification instructions. Task 4 documents live-query checks separately from completed-block shipping and historical-query verification. Tasks 5–6 still require their Grafana provisioning and durability-test procedures. Use the existing configuration files; do not recreate files that are already present.
+**Assignment:** Project 5.4 — Scaling Monitoring Infrastructure with Prometheus and Grafana
+
+**Submitted by:** Snehal Shinde
+
