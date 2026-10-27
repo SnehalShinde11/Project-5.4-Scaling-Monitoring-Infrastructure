@@ -1,0 +1,60 @@
+services:
+  minio:
+    image: cgr.dev/chainguard/minio:latest
+    command: server /data --console-address ":9001"
+    env_file:
+      - .env
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    volumes:
+      - minio_data:/data
+    restart: unless-stopped
+
+  prometheus-us-east:
+    image: prom/prometheus:latest
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=24h
+      - --web.enable-lifecycle
+    ports:
+      - "127.0.0.1:9091:9090"
+    volumes:
+      - ./prometheus/us-east/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_us_east_data:/prometheus
+    restart: unless-stopped
+
+  prometheus-eu-west:
+    image: prom/prometheus:latest
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=24h
+      - --web.enable-lifecycle
+    ports:
+      - "127.0.0.1:9092:9090"
+    volumes:
+      - ./prometheus/eu-west/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_eu_west_data:/prometheus
+    restart: unless-stopped
+
+  prometheus-ap-south:
+    image: prom/prometheus:latest
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=24h
+      - --web.enable-lifecycle
+    ports:
+      - "127.0.0.1:9093:9090"
+    volumes:
+      - ./prometheus/ap-south/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_ap_south_data:/prometheus
+    restart: unless-stopped
+
+volumes:
+  minio_data:
+  prometheus_us_east_data:
+  prometheus_eu_west_data:
+  prometheus_ap_south_data:
